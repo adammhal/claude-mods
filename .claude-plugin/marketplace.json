@@ -1,0 +1,7 @@
+{
+  "name": "adam-mods",
+  "owner": { "name": "Adam" },
+  "plugins": [
+    { "name": "left-undone", "source": "./left-undone", "description": "Sidebar that tracks promises Claude made and hasn't kept yet." }
+  ]
+}

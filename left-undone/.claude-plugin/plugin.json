@@ -1,0 +1,1 @@
+{ "name": "left-undone", "version": "0.1.0", "description": "A sidebar listing todos Claude left undone; press a letter to flag one, then send Claude back to finish it.", "types": "./types/index.d.ts" }
