@@ -1,11 +1,19 @@
 import { atom, read, update } from 'claude-code'
-import type { Register } from 'claude-code'
+import type { Engine, Register } from 'claude-code'
 
 import type { Undone } from '../types'
 
 const PANE = 'left-undone'
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz'
 const items = atom({ plugin: 'left-undone', key: 'items' } as const, [])
+
+// Promises outlive the session: every change is mirrored into $.store, and
+// session.start reads it back. Todos are Claude's own list and stay per-session.
+const change = async ($: Engine, fn: (old: Undone[]) => Undone[]) => {
+  await update($, items, fn)
+  const open = (await read($, items)).filter(i => i.kind === 'open')
+  await $.store.set('open', open)
+}
 
 const MAX_OPEN = 300
 const RULES = `You audit an AI assistant's promises. You are given PROMISES it made earlier that are still open, and its latest REPLY, both inside tags. Answer with a single JSON object and nothing else: {"done": [numbers], "add": ["..."]}
@@ -45,6 +53,10 @@ export const register: Register = on => {
       name: 'left-undone',
       description: 'Show the list of todos Claude left undone',
     })
+    const saved = await $.store.get('open')
+    if (Array.isArray(saved) && saved.length > 0) {
+      await update($, items, old => [...old.filter(i => i.kind === 'todo'), ...(saved as Undone[])])
+    }
     void $.ui.open({ id: PANE, title: 'Left undone' })
 
     return next(e)
@@ -60,7 +72,7 @@ export const register: Register = on => {
   // "undone". Flags survive a rewrite when the todo's text is unchanged.
   on('tool.call', { tool: 'TodoWrite' }, async ($, e, next) => {
     const ran = await next(e)
-    await update($, items, old => [
+    await change($, old => [
       ...e.todos
         .filter(t => t.status !== 'completed')
         .map(t => ({
@@ -92,7 +104,7 @@ export const register: Register = on => {
       if (!r.isAnswered) $.ui.toast(`left-undone: model call failed (${r.reason})`)
       const closed = new Set(audit.done.map(n => open[n - 1]?.text))
       if (closed.size > 0 || audit.add.length > 0) {
-        await update($, items, old => [
+        await change($, old => [
           ...old.filter(o => !(o.kind === 'open' && closed.has(o.text))),
           ...audit.add
             .filter(text => !old.some(o => o.text === text))
@@ -118,7 +130,7 @@ export const register: Register = on => {
     const flagged = list.filter(i => i.isFlagged)
 
     const toggle = (target: Undone) =>
-      update($, items, cur =>
+      change($, cur =>
         cur.map(one =>
           one.kind === target.kind && one.text === target.text
             ? { ...one, isFlagged: !one.isFlagged }
@@ -129,13 +141,13 @@ export const register: Register = on => {
     const send = async () => {
       if (flagged.length === 0) return
       const text = flagged.map(i => `You left this undone: ${i.text}`).join('\n')
-      await update($, items, all => all.map(one => ({ ...one, isFlagged: false })))
+      await change($, all => all.map(one => ({ ...one, isFlagged: false })))
       await $.prompt.submit({ text, asUser: true })
     }
 
     const markDone = async () => {
       if (flagged.length === 0) return
-      await update($, items, cur =>
+      await change($, cur =>
         cur.filter(one => !flagged.some(f => f.kind === one.kind && f.text === one.text)),
       )
     }
