@@ -1,0 +1,1 @@
+{ "name": "approve-blocked", "version": "0.1.0", "description": "When auto mode's classifier blocks a tool call, ask you to approve it manually instead." }

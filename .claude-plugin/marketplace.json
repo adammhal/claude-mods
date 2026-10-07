@@ -1,7 +1,18 @@
 {
   "name": "adam-mods",
-  "owner": { "name": "Adam" },
+  "owner": {
+    "name": "Adam"
+  },
   "plugins": [
-    { "name": "left-undone", "source": "./left-undone", "description": "Sidebar that tracks promises Claude made and hasn't kept yet." }
+    {
+      "name": "left-undone",
+      "source": "./left-undone",
+      "description": "Sidebar that tracks promises Claude made and hasn't kept yet."
+    },
+    {
+      "name": "approve-blocked",
+      "source": "./approve-blocked",
+      "description": "When auto mode's classifier blocks a tool call, ask you to approve it manually."
+    }
   ]
 }
