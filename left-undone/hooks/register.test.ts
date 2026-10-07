@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { parseAudit } from './register'
+import { fromMarkdown, parseAudit, toMarkdown } from './register'
 
 test('parseAudit reads closed numbers and new promises', () => {
   expect(parseAudit('ok {"done": [1, "x", 2], "add": ["Publish the page", " ", 3]}')).toEqual({ done: [1, 2], add: ['Publish the page'] })
@@ -30,4 +30,17 @@ test('a finished turn adds only the open items the model finds', async ($, on) =
   await $.turn.complete({ reason: 'answer' } as never)
   const tree = await $.ui.render({ component: 'Pane', requestId: 'left-undone', surface: 'terminal' } as never)
   expect(JSON.stringify(tree)).toBeDefined()
+})
+
+test('markdown export round-trips through import', () => {
+  const md = toMarkdown(
+    [
+      { text: 'Ship the pane', kind: 'open', isFlagged: false },
+      { text: 'Write tests', kind: 'todo', isFlagged: true },
+    ],
+    '2026-10-07 11:50',
+  )
+  expect(md).toContain('- [ ] Ship the pane')
+  expect(fromMarkdown(md)).toEqual(['Ship the pane', 'Write tests'])
+  expect(fromMarkdown('notes\n* [x] done thing\n- [ ]\n- [ ] kept')).toEqual(['done thing', 'kept'])
 })

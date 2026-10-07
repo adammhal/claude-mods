@@ -7,12 +7,50 @@ const PANE = 'left-undone'
 const LETTERS = 'abcdefghijklmnopqrstuvwxyz'
 const items = atom({ plugin: 'left-undone', key: 'items' } as const, [])
 
-// Promises outlive the session: every change is mirrored into $.store, and
-// session.start reads it back. Todos are Claude's own list and stay per-session.
-const change = async ($: Engine, fn: (old: Undone[]) => Undone[]) => {
-  await update($, items, fn)
-  const open = (await read($, items)).filter(i => i.kind === 'open')
-  await $.store.set('open', open)
+// Promises live in the session's own state: each agent keeps its own list.
+// Export and import carry them across a restart.
+const change = ($: Engine, fn: (old: Undone[]) => Undone[]) => update($, items, fn)
+
+export const toMarkdown = (list: Undone[], when: string): string =>
+  `# Left undone\n\nExported ${when}\n\n${list.map(i => `- [ ] ${i.text}`).join('\n')}\n`
+
+export const fromMarkdown = (text: string): string[] =>
+  text
+    .split('\n')
+    .map(line => line.match(/^\s*[-*]\s+\[[ xX]\]\s+(.+?)\s*$/)?.[1])
+    .filter((t): t is string => t !== undefined && t.length > 0)
+    .map(t => t.slice(0, 240))
+
+const DIR = '.claude/left-undone'
+const LATEST = 'latest.md'
+const home = async ($: Engine) => (await $.process.run(['printenv', 'HOME'])).stdout.trim()
+
+const exportList = async ($: Engine) => {
+  const list = (await read($, items)).filter(i => i.text.length > 0)
+  if (list.length === 0) return 'Nothing to export.'
+  const dir = `${await home($)}/${DIR}`
+  await $.process.run(['mkdir', '-p', dir])
+  const now = new Date()
+  const stamp = now.toISOString().slice(0, 16).replace('T', ' ')
+  const text = toMarkdown(list, stamp)
+  await $.fs.write(`${dir}/${LATEST}`, text)
+  await $.fs.write(`${dir}/${stamp.replace(/[ :]/g, '-')}.md`, text)
+
+  return `Exported ${list.length} to ~/${DIR}/${LATEST}`
+}
+
+const importList = async ($: Engine, path?: string) => {
+  const file = path?.trim() || `${await home($)}/${DIR}/${LATEST}`
+  if (!(await $.fs.exists(file))) return `No export found at ${file}`
+  const added = fromMarkdown(await $.fs.read(file))
+  await change($, old => [
+    ...old,
+    ...[...new Set(added)]
+      .filter(text => !old.some(o => o.text === text))
+      .map(text => ({ text, kind: 'open' as const, isFlagged: false })),
+  ].slice(-MAX_OPEN))
+
+  return `Imported ${added.length} from ${file}`
 }
 
 const MAX_OPEN = 300
@@ -53,10 +91,14 @@ export const register: Register = on => {
       name: 'left-undone',
       description: 'Show the list of todos Claude left undone',
     })
-    const saved = await $.store.get('open')
-    if (Array.isArray(saved) && saved.length > 0) {
-      await update($, items, old => [...old.filter(i => i.kind === 'todo'), ...(saved as Undone[])])
-    }
+    await $.command.register({
+      name: 'left-undone-export',
+      description: 'Export the left-undone list to a Markdown file',
+    })
+    await $.command.register({
+      name: 'left-undone-import',
+      description: 'Import a left-undone Markdown export (default: the latest)',
+    })
     void $.ui.open({ id: PANE, title: 'Left undone' })
 
     return next(e)
@@ -67,6 +109,12 @@ export const register: Register = on => {
 
     return { text: 'Left undone pane opened.' }
   })
+
+  on('command.run', { command: 'left-undone-export' }, async $ => ({ text: await exportList($) }))
+
+  on('command.run', { command: 'left-undone-import' }, async ($, e) => ({
+    text: await importList($, e.args),
+  }))
 
   // Every TodoWrite replaces the todo entries; whatever is not completed is
   // "undone". Flags survive a rewrite when the todo's text is unchanged.
@@ -181,7 +229,19 @@ export const register: Register = on => {
             onPress={() => void send()}
           />
         )}
-        <Text dimColor>letter = flag, 1 = send to Claude, 2 = mark done</Text>
+        <Button
+          key="export"
+          hotkey="3"
+          label="Export to Markdown"
+          onPress={() => void exportList($).then(t => $.ui.toast(t))}
+        />
+        <Button
+          key="import"
+          hotkey="4"
+          label="Import latest export"
+          onPress={() => void importList($).then(t => $.ui.toast(t))}
+        />
+        <Text dimColor>letter = flag, 1 = send, 2 = done, 3 = export, 4 = import</Text>
       </Box>
     )
   })
